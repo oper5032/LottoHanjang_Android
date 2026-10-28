@@ -1,0 +1,15 @@
+.gradle/
+.gradle-user-home/
+.idea/
+local.properties
+**/build/
+*.iml
+.kotlin/
+
+# Local signing keys and credentials
+*.jks
+*.keystore
+keystore.properties
+key.properties
+.env
+.env.*
