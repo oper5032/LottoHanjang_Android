@@ -1,10 +1,6 @@
 package com.lotto.hanjang
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,7 +15,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,7 +23,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.android.gms.ads.MobileAds
 
 private val Background = Color(0xFFF7F6F0)
 private val Ink = Color(0xFF19392F)
@@ -40,7 +34,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        MobileAds.initialize(this) {}
+        val adPrivacy = AdPrivacy(this)
+        adPrivacy.refresh()
         setContent {
             MaterialTheme(colorScheme = lightColorScheme(primary = Green, background = Background,
                 surface = Color.White, onSurface = Ink, onBackground = Ink)) {
@@ -54,8 +49,8 @@ class MainActivity : ComponentActivity() {
                     lifecycle.addObserver(observer)
                     onDispose { lifecycle.removeObserver(observer) }
                 }
-                LottoScreen(state, vm::free, {
-                    vm.reward { token -> RewardAds.show(this,
+                LottoScreen(state, adPrivacy, vm::free, {
+                    if (adPrivacy.canRequestAds && !adPrivacy.busy) vm.reward { token -> RewardAds.show(this,
                         earned = { vm.earned(token) }, closed = vm::adClosed, failed = vm::adFailed) }
                 }, vm::clearMessage)
             }
@@ -64,10 +59,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun LottoScreen(state: LottoState, free: () -> Unit, reward: () -> Unit, clear: () -> Unit) {
-    val context = LocalContext.current
+private fun LottoScreen(state: LottoState, adPrivacy: AdPrivacy, free: () -> Unit, reward: () -> Unit, clear: () -> Unit) {
     var settings by remember { mutableStateOf(false) }
     var rewardInfo by remember { mutableStateOf(false) }
+    var privacyPolicy by remember { mutableStateOf(false) }
     val ticket = if (state.ticket.date == LottoRules.today()) state.ticket else Ticket()
     val count = ticket.games.size
     Surface(color = Background, modifier = Modifier.fillMaxSize()) {
@@ -119,7 +114,8 @@ private fun LottoScreen(state: LottoState, free: () -> Unit, reward: () -> Unit,
                     }
                 }
                 Button(onClick = { if (count == 0) free() else rewardInfo = true },
-                    enabled = state.ready && !state.busy && count < 5,
+                    enabled = state.ready && !state.busy && count < 5 &&
+                        (count == 0 || (adPrivacy.canRequestAds && !adPrivacy.busy)),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(disabledContainerColor = Soft, disabledContentColor = Ink)) {
                     if (state.busy) {
@@ -132,21 +128,16 @@ private fun LottoScreen(state: LottoState, free: () -> Unit, reward: () -> Unit,
                 }
                 Text(if (count == 5) "내일 00:00에 다시 번호를 받을 수 있어요."
                     else "첫 게임 무료 · 이후 광고 1회당 1게임", fontSize = 12.sp, color = Green)
+                if (count in 1..4 && (!adPrivacy.canRequestAds || adPrivacy.busy)) {
+                    Text("광고 개인정보 설정 확인 후 추가 번호를 받을 수 있어요. 기존 번호는 계속 볼 수 있어요.",
+                        fontSize = 12.sp, color = Muted)
+                    TextButton(onClick = adPrivacy::refresh, enabled = !adPrivacy.busy) {
+                        Text(if (adPrivacy.busy) "광고 설정 확인 중…" else "광고 설정 다시 확인")
+                    }
+                }
+                adPrivacy.message?.let { Text(it, fontSize = 12.sp, color = Muted) }
                 Text("무작위 번호 추천이며 당첨을 보장하지 않아요.\n실제 복권 구매·결제 기능은 제공하지 않아요.",
                     fontSize = 11.sp, lineHeight = 17.sp, color = Muted)
-                TextButton(
-                    onClick = {
-                        try {
-                            context.startActivity(Intent(Intent.ACTION_VIEW,
-                                Uri.parse("https://www.dhlottery.co.kr/")))
-                        } catch (_: ActivityNotFoundException) {
-                            Toast.makeText(context, "사이트를 열 수 있는 브라우저가 없어요.", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                ) {
-                    Text("동행복권 사이트 바로가기 ↗", fontSize = 13.sp, color = Green)
-                }
             }
         }
     }
@@ -154,13 +145,30 @@ private fun LottoScreen(state: LottoState, free: () -> Unit, reward: () -> Unit,
         title = { Text("다음 한 줄을 채워볼까요?") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("+1 GAME", color = Green, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Text("광고를 끝까지 시청하면 새 번호가 제공돼요.\n중간에 닫으면 번호는 지급되지 않아요.")
+            Text("광고 1회의 보상 조건을 완료하면 무작위 번호 6개로 된 1게임이 추가돼요. 실제 복권이나 현금 보상이 아니며, 당첨 확률을 높여주지 않아요.\n보상 조건 완료 전에 닫으면 추가 번호는 지급되지 않지만 기존 번호는 계속 볼 수 있어요.\n한국 시간 자정에는 기존 번호와 횟수가 초기화되며, 날짜가 바뀌면 이전 날짜의 광고 보상은 지급되지 않아요.")
             Text("현재 $count / 5게임 · 추가 가능 ${5-count}게임", color = Muted)
         } }, confirmButton = { TextButton(onClick = { rewardInfo = false; clear(); reward() }) { Text("광고 보고 1게임 더 받기") } },
         dismissButton = { TextButton(onClick = { rewardInfo = false }) { Text("닫기") } })
     if (settings) AlertDialog(onDismissRequest = { settings = false }, title = { Text("로또 한장 설정") },
-        text = { Text("하루 무료 1게임 + 광고 보상 최대 4게임\n\n한국 시간 자정에 번호와 횟수가 초기화돼요. 번호는 이 기기에만 저장돼요.\n\n개발 버전 · Google 테스트 광고 사용\n\n공식 복권 서비스와 무관한 독립 번호 추천 앱이에요.") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) {
+            Text("하루 무료 1게임 + 광고 보상 최대 4게임\n\n한국 시간 자정에 번호와 횟수가 초기화돼요. 번호는 이 기기에만 저장돼요." +
+            (if (BuildConfig.DEBUG) "\n\n개발 버전 · Google 테스트 광고 사용" else "") +
+            "\n\n공식 복권 서비스와 무관한 독립 번호 추천 앱이에요.")
+            TextButton(onClick = { privacyPolicy = true }) { Text("개인정보처리방침") }
+            if (adPrivacy.optionsRequired) {
+                TextButton(onClick = adPrivacy::showOptions, enabled = !adPrivacy.busy && !state.busy) {
+                    Text("광고 개인정보 선택 변경")
+                }
+            }
+            if (!adPrivacy.canRequestAds) {
+                TextButton(onClick = adPrivacy::refresh, enabled = !adPrivacy.busy) { Text("광고 설정 다시 확인") }
+            }
+        } },
         confirmButton = { TextButton(onClick = { settings = false }) { Text("닫기") } })
+    if (privacyPolicy) AlertDialog(onDismissRequest = { privacyPolicy = false },
+        title = { Text("개인정보처리방침") },
+        text = { Text(PrivacyPolicy.text, Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) },
+        confirmButton = { TextButton(onClick = { privacyPolicy = false }) { Text("닫기") } })
 }
 
 private fun ballColor(number: Int?): Color = when (number) {

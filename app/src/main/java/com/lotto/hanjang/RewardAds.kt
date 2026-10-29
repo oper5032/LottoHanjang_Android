@@ -7,12 +7,15 @@ import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
+import com.google.android.ump.UserMessagingPlatform
 
 object RewardAds {
-    // Google's dedicated Android rewarded test unit. Never requests production ads.
-    private const val TEST_UNIT = "ca-app-pub-3940256099942544/5224354917"
     fun show(activity: Activity, earned: () -> Unit, closed: (Boolean) -> Unit, failed: () -> Unit) {
-        RewardedAd.load(activity, TEST_UNIT, AdRequest.Builder().build(), object : RewardedAdLoadCallback() {
+        if (!UserMessagingPlatform.getConsentInformation(activity).canRequestAds()) {
+            failed()
+            return
+        }
+        RewardedAd.load(activity, BuildConfig.REWARDED_AD_UNIT_ID, AdRequest.Builder().build(), object : RewardedAdLoadCallback() {
             override fun onAdFailedToLoad(error: LoadAdError) = failed()
             override fun onAdLoaded(ad: RewardedAd) {
                 if (activity.isFinishing || activity.isDestroyed) { failed(); return }
